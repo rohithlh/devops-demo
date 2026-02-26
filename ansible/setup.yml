@@ -1,0 +1,130 @@
+---
+# Ansible Playbook — Configure Ubuntu server for DevOps tools
+# Usage: ansible-playbook -i inventory.ini setup.yml
+
+- name: Setup DevOps server
+  hosts: all
+  become: true   # Run as sudo
+
+  vars:
+    docker_user: "{{ ansible_user }}"
+
+  tasks:
+    # ── System Update ──────────────────────────────────────────────────────────
+    - name: Update apt cache and upgrade packages
+      apt:
+        update_cache: yes
+        upgrade: yes
+        cache_valid_time: 3600
+
+    - name: Install essential packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - vim
+          - htop
+          - unzip
+          - ca-certificates
+          - apt-transport-https
+          - gnupg
+          - lsb-release
+        state: present
+
+    # ── Docker ────────────────────────────────────────────────────────────────
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add user to docker group
+      user:
+        name: "{{ docker_user }}"
+        groups: docker
+        append: yes
+
+    # ── kubectl ───────────────────────────────────────────────────────────────
+    - name: Install kubectl
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+        rm kubectl
+      args:
+        creates: /usr/local/bin/kubectl
+
+    # ── Terraform ─────────────────────────────────────────────────────────────
+    - name: Add HashiCorp GPG key
+      apt_key:
+        url: https://apt.releases.hashicorp.com/gpg
+        state: present
+
+    - name: Add HashiCorp repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"
+        state: present
+
+    - name: Install Terraform
+      apt:
+        name: terraform
+        state: present
+
+    # ── AWS CLI ───────────────────────────────────────────────────────────────
+    - name: Install AWS CLI v2
+      shell: |
+        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+        unzip -q /tmp/awscliv2.zip -d /tmp
+        /tmp/aws/install
+        rm -rf /tmp/awscliv2.zip /tmp/aws
+      args:
+        creates: /usr/local/bin/aws
+
+    # ── Helm ──────────────────────────────────────────────────────────────────
+    - name: Install Helm
+      shell: |
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+
+    # ── Minikube (for local K8s practice) ────────────────────────────────────
+    - name: Install Minikube
+      shell: |
+        curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        install minikube-linux-amd64 /usr/local/bin/minikube
+        rm minikube-linux-amd64
+      args:
+        creates: /usr/local/bin/minikube
+
+    - name: Print installed versions
+      shell: |
+        echo "Docker: $(docker --version)"
+        echo "kubectl: $(kubectl version --client --short 2>/dev/null)"
+        echo "Terraform: $(terraform version | head -1)"
+        echo "AWS CLI: $(aws --version)"
+        echo "Helm: $(helm version --short)"
+      register: versions
+
+    - name: Show versions
+      debug:
+        msg: "{{ versions.stdout_lines }}"
+
